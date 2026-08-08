@@ -1,57 +1,51 @@
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+#!/usr/bin/env bash
+set -euo pipefail
+
 export HYDRA_FULL_ERROR=1
+export MPLCONFIGDIR=/tmp/diffusion-planner-matplotlib
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 
-###################################
-# User Configuration Section
-###################################
-# Set environment variables
-export NUPLAN_DEVKIT_ROOT="REPLACE_WITH_NUPLAN_DEVIKIT_DIR"  # nuplan-devkit absolute path (e.g., "/home/user/nuplan-devkit")
-export NUPLAN_DATA_ROOT="REPLACE_WITH_DATA_DIR"  # nuplan dataset absolute path (e.g. "/data")
-export NUPLAN_MAPS_ROOT="REPLACE_WITH_MAPS_DIR" # nuplan maps absolute path (e.g. "/data/nuplan-v1.1/maps")
-export NUPLAN_EXP_ROOT="REPLACE_WITH_EXP_DIR" # nuplan experiment absolute path (e.g. "/data/nuplan-v1.1/exp")
+REPO_ROOT="/data/saba/parnia/Project/Diffusion-Planner"
+export NUPLAN_DEVKIT_ROOT="/data/saba/parnia/nuplan-devkit"
+export NUPLAN_DATA_ROOT="/data/saba/parnia/Project/data/data/cache/mini"
+export NUPLAN_MAPS_ROOT="/data/saba/parnia/nuplan_maps"
+export NUPLAN_EXP_ROOT="/data/saba/parnia/Project/exp"
 
-# Dataset split to use
-# Options: 
-#   - "test14-random"
-#   - "test14-hard"
-#   - "val14"
-SPLIT="REPLACE_WITH_SPLIT"  # e.g., "val14"
+PYTHON_BIN="/data/saba/miniforge3/envs/diffusion_planner/bin/python"
+SPLIT="all_scenarios"
+CHALLENGE="closed_loop_nonreactive_agents"
+SCENARIO_BUILDER="nuplan_mini"
+DB_FILES="[$NUPLAN_DATA_ROOT/2021.05.12.22.00.38_veh-35_01008_01518.db,$NUPLAN_DATA_ROOT/2021.06.14.18.33.41_veh-35_03901_04264.db,$NUPLAN_DATA_ROOT/2021.07.16.00.51.05_veh-17_01352_01901.db,$NUPLAN_DATA_ROOT/2021.10.05.07.10.04_veh-52_01442_01802.db]"
+BRANCH_NAME="diffusion_planner_release"
+ARGS_FILE="$REPO_ROOT/checkpoints/args.json"
+CKPT_FILE="$REPO_ROOT/checkpoints/model.pth"
+PLANNER="diffusion_planner"
 
-# Challenge type
-# Options: 
-#   - "closed_loop_nonreactive_agents"
-#   - "closed_loop_reactive_agents"
-CHALLENGE="REPLACE_WITH_CHALLENGE"  # e.g., "closed_loop_nonreactive_agents"
-###################################
+cd "$REPO_ROOT"
+echo "Checkpoint: $CKPT_FILE"
+echo "Mini log:   $NUPLAN_DATA_ROOT"
+echo "Databases:  $DB_FILES"
+echo "Results:    $NUPLAN_EXP_ROOT"
 
-
-BRANCH_NAME=diffusion_planner_release
-ARGS_FILE=./checkpoints/args.json
-CKPT_FILE=./checkpoints/model.pth
-
-if [ "$SPLIT" == "val14" ]; then
-    SCENARIO_BUILDER="nuplan"
-else
-    SCENARIO_BUILDER="nuplan_challenge"
-fi
-echo "Processing $CKPT_FILE..."
-FILENAME=$(basename "$CKPT_FILE")
-FILENAME_WITHOUT_EXTENSION="${FILENAME%.*}"
-
-PLANNER=diffusion_planner
-
-python $NUPLAN_DEVKIT_ROOT/nuplan/planning/script/run_simulation.py \
-    +simulation=$CHALLENGE \
-    planner=$PLANNER \
-    planner.diffusion_planner.config.args_file=$ARGS_FILE \
-    planner.diffusion_planner.ckpt_path=$CKPT_FILE \
-    scenario_builder=$SCENARIO_BUILDER \
-    scenario_filter=$SPLIT \
-    experiment_uid=$PLANNER/$SPLIT/$BRANCH_NAME/${FILENAME_WITHOUT_EXTENSION}_$(date "+%Y-%m-%d-%H-%M-%S") \
-    verbose=true \
-    worker=ray_distributed \
-    worker.threads_per_node=128 \
-    distributed_mode='SINGLE_NODE' \
-    number_of_gpus_allocated_per_simulation=0.15 \
-    enable_simulation_progress_bar=true \
-    hydra.searchpath="[pkg://diffusion_planner.config.scenario_filter, pkg://diffusion_planner.config, pkg://nuplan.planning.script.config.common, pkg://nuplan.planning.script.experiments  ]"
+"$PYTHON_BIN" -u "$NUPLAN_DEVKIT_ROOT/nuplan/planning/script/run_simulation.py" \
+  +simulation="$CHALLENGE" \
+  ego_controller=perfect_tracking_controller \
+  planner="$PLANNER" \
+  planner.diffusion_planner.config.args_file="$ARGS_FILE" \
+  planner.diffusion_planner.ckpt_path="$CKPT_FILE" \
+  scenario_builder="$SCENARIO_BUILDER" \
+  scenario_builder.data_root="$NUPLAN_DATA_ROOT" \
+  scenario_builder.db_files="$DB_FILES" \
+  scenario_filter="$SPLIT" \
+  scenario_filter.limit_total_scenarios=50 \
+  scenario_filter.shuffle=false \
+  experiment_uid="$PLANNER/mini/$BRANCH_NAME/model_$(date +%Y-%m-%d-%H-%M-%S)" \
+  verbose=true \
+  worker=ray_distributed \
+  worker.threads_per_node=2 \
+  distributed_mode=SINGLE_NODE \
+  number_of_gpus_allocated_per_simulation=0.15 \
+  enable_simulation_progress_bar=true \
+  'hydra.searchpath=[pkg://diffusion_planner.config.scenario_filter,pkg://diffusion_planner.config,pkg://nuplan.planning.script.config.common,pkg://nuplan.planning.script.experiments]'
