@@ -7,6 +7,7 @@ from typing import Deque, Dict, List, Type
 warnings.filterwarnings("ignore")
 
 from nuplan.common.actor_state.ego_state import EgoState
+from nuplan.planning.scenario_builder.abstract_scenario import AbstractScenario
 from nuplan.common.utils.interpolatable_state import InterpolatableState
 from nuplan.planning.simulation.trajectory.trajectory_sampling import TrajectorySampling
 from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTrajectory
@@ -21,11 +22,16 @@ from diffusion_planner.model.diffusion_planner import Diffusion_Planner
 from diffusion_planner.data_process.data_processor import DataProcessor
 from diffusion_planner.utils.config import Config
 
+from diffusion_planner.activation_extractor import DiTActivationExtractor
+
 def identity(ego_state, predictions):
     return predictions
 
 
 class DiffusionPlanner(AbstractPlanner):
+    # Ask nuPlan's planner builder to pass the scenario to the constructor.
+    requires_scenario: bool = True
+
     def __init__(
             self,
             config: Config,
@@ -33,6 +39,7 @@ class DiffusionPlanner(AbstractPlanner):
 
             past_trajectory_sampling: TrajectorySampling, 
             future_trajectory_sampling: TrajectorySampling,
+            scenario: AbstractScenario,
 
             enable_ema: bool = True,
             device: str = "cpu",
@@ -53,8 +60,23 @@ class DiffusionPlanner(AbstractPlanner):
 
         self._ema_enabled = enable_ema
         self._device = device
+        self._scenario = scenario
+        self._scenario_info = {
+            "token": scenario.token,
+            "scenario_name": scenario.scenario_name,
+            "scenario_type": scenario.scenario_type,
+            "log_name": scenario.log_name,
+            "map_name": scenario.map_api.map_name,
+        }
+
+        
 
         self._planner = Diffusion_Planner(config)
+
+        self.activation_extractor = DiTActivationExtractor(
+                                                                    self._planner,
+                                                                    target_t=0.5
+                                                                )
 
         self.data_processor = DataProcessor(config)
         
@@ -97,6 +119,9 @@ class DiffusionPlanner(AbstractPlanner):
         self._planner = self._planner.to(self._device)
         self._initialization = initialization
 
+        self.activation_extractor.reset_simulation(self._scenario_info)
+
+
     def planner_input_to_model_inputs(self, planner_input: PlannerInput) -> Dict[str, torch.Tensor]:
         history = planner_input.history
         traffic_light_data = list(planner_input.traffic_light_data)
@@ -105,7 +130,8 @@ class DiffusionPlanner(AbstractPlanner):
         return model_inputs
 
     def outputs_to_trajectory(self, outputs: Dict[str, torch.Tensor], ego_state_history: Deque[EgoState]) -> List[InterpolatableState]:    
-
+        # Scenario metadata is available here as self._scenario_info, and the
+        # complete nuPlan scenario object is available as self._scenario.
         predictions = outputs['prediction'][0, 0].detach().cpu().numpy().astype(np.float64) # T, 4
         heading = np.arctan2(predictions[:, 3], predictions[:, 2])[..., None]
         predictions = np.concatenate([predictions[..., :2], heading], axis=-1) 
@@ -120,12 +146,17 @@ class DiffusionPlanner(AbstractPlanner):
         """
         inputs = self.planner_input_to_model_inputs(current_input)
 
-        inputs = self.observation_normalizer(inputs)        
+        inputs = self.observation_normalizer(inputs)     
+
+        self.activation_extractor.begin_planning_call()
         _, outputs = self._planner(inputs)
+        self.activation_extractor.finish_planning_call()  
+
+        # _, outputs = self._planner(inputs)   
+        
 
         trajectory = InterpolatedTrajectory(
             trajectory=self.outputs_to_trajectory(outputs, current_input.history.ego_states)
         )
 
         return trajectory
-    

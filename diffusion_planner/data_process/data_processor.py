@@ -150,8 +150,17 @@ class DataProcessor(object):
             ego_current_state = calculate_additional_ego_states(ego_agent_past, time_stamps_past)
 
             # gather data
-            data = {"map_name": map_name, "token": token, "ego_current_state": ego_current_state, "ego_agent_future": ego_agent_future,
-                    "neighbor_agents_past": neighbor_agents_past, "neighbor_agents_future": neighbor_agents_future, "static_objects": static_objects}
+            data = {"map_name": map_name, 
+                    "token": token, 
+                    "ego_current_state": ego_current_state, 
+                    "ego_agent_future": ego_agent_future,
+                    "neighbor_agents_past": neighbor_agents_past, 
+                    "neighbor_agents_future": neighbor_agents_future, 
+                    "static_objects": static_objects,
+                    #added these myself
+                    "log_name": scenario.log_name,
+                    "scenario_type": scenario.scenario_type,
+                    }
             data.update(vector_map)
 
             self.save_to_disk(self._save_dir, data)

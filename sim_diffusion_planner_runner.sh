@@ -39,8 +39,8 @@ echo "Results:    $NUPLAN_EXP_ROOT"
   scenario_builder.data_root="$NUPLAN_DATA_ROOT" \
   scenario_builder.db_files="$DB_FILES" \
   scenario_filter="$SPLIT" \
-  scenario_filter.limit_total_scenarios=50 \
-  scenario_filter.shuffle=false \
+  scenario_filter.limit_total_scenarios=150 \
+  scenario_filter.shuffle=true \
   experiment_uid="$PLANNER/mini/$BRANCH_NAME/model_$(date +%Y-%m-%d-%H-%M-%S)" \
   verbose=true \
   worker=ray_distributed \

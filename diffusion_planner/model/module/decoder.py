@@ -10,6 +10,8 @@ from diffusion_planner.utils.normalizer import ObservationNormalizer, StateNorma
 from diffusion_planner.model.module.mixer import MixerBlock
 from diffusion_planner.model.module.dit import TimestepEmbedder, DiTBlock, FinalLayer
 
+import json, os
+
 
 class Decoder(nn.Module):
     def __init__(self, config):
@@ -138,6 +140,7 @@ class Decoder(nn.Module):
                         },
                 )
             x0 = self._state_normalizer.inverse(x0.reshape(B, P, -1, 4))[:, :, 1:]
+            # X0 IS THE ACTUAL PREDICTED TRAJ HERE.
 
             return {
                     "prediction": x0
@@ -231,8 +234,20 @@ class DiT(nn.Module):
         attn_mask = torch.zeros((B, P), dtype=torch.bool, device=x.device)
         attn_mask[:, 1:] = neighbor_current_mask
         
-        for block in self.blocks:
-            x = block(x, cross_c, y, attn_mask)  
+        # info=[]
+        for i,block in enumerate(self.blocks):
+            x = block(x, cross_c, y, attn_mask)  #THE ACTIVATIONS.
+        #     if i==1 :
+        #         data={
+        #             'activation': x[:, 0, :].detach().cpu().tolist(),
+        #             "t": t.detach().cpu().tolist() if torch.is_tensor(t) else t,
+        #         }
+        #         info.append(data)
+
+        # # print(len(info),'for 1')
+        # with open("/data/saba/parnia/Project/Diffusion-Planner/activations.json", "w", encoding="utf-8") as file:
+        #     json.dump(info, file, indent=4)
+                
             
         x = self.final_layer(x, y)
         
