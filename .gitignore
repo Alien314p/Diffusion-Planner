@@ -1,0 +1,58 @@
+Project/runtime/tmp/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+
+# Model weights and generated tensors
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+
+# Logs and runtime files
+*.log
+Project/runtime/
+Project/diagnostics/
+Project/exp/
+
+# Datasets, maps, and caches
+Project/data/data/cache/
+nuplan_maps/
+nuplan-devkit/
+simulation_runs_by_t/
+
+# Generated experiment outputs
+activation_pt_files/
+activations_by_t/
+sae_output/
+trajectory_comparisons/
+Project/sae_output/
+
+# Local databases and temporary files
+*.db
+*.sqlite
+*.sqlite3
+tmp/
+temp/
+nuplan-devkit/
+nuplan-devkit/
