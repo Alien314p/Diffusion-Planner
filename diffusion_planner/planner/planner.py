@@ -1,5 +1,6 @@
 
 import warnings
+from pathlib import Path
 import torch
 import numpy as np
 from typing import Deque, Dict, List, Type
@@ -22,7 +23,12 @@ from diffusion_planner.model.diffusion_planner import Diffusion_Planner
 from diffusion_planner.data_process.data_processor import DataProcessor
 from diffusion_planner.utils.config import Config
 
-from diffusion_planner.activation_extractor import DiTActivationExtractor
+from diffusion_planner.activation_extractor import (
+    DEFAULT_ACTIVATION_DIR,
+    DEFAULT_SAE_PATH,
+    DiTActivationExtractor,
+    SAEReconstructionHook,
+)
 
 def identity(ego_state, predictions):
     return predictions
@@ -43,6 +49,11 @@ class DiffusionPlanner(AbstractPlanner):
 
             enable_ema: bool = True,
             device: str = "cpu",
+            activation_dir: str = str(DEFAULT_ACTIVATION_DIR),
+            activation_target_ts=(0.1, 0.2, 0.4, 0.6, 0.8),
+            enable_sae_reconstruction: bool = False,
+            sae_path: str = str(DEFAULT_SAE_PATH),
+            comparison_dir: str = "/data/saba/parnia/trajectory_comparisons",
         ):
 
         assert device in ["cpu", "cuda"], f"device {device} not supported"
@@ -61,6 +72,9 @@ class DiffusionPlanner(AbstractPlanner):
         self._ema_enabled = enable_ema
         self._device = device
         self._scenario = scenario
+        self._enable_sae_reconstruction = enable_sae_reconstruction
+        self._comparison_dir = Path(comparison_dir)
+        self._comparison_index = 0
         self._scenario_info = {
             "token": scenario.token,
             "scenario_name": scenario.scenario_name,
@@ -74,9 +88,14 @@ class DiffusionPlanner(AbstractPlanner):
         self._planner = Diffusion_Planner(config)
 
         self.activation_extractor = DiTActivationExtractor(
-                                                                    self._planner,
-                                                                    target_t=0.5
-                                                                )
+            self._planner,
+            save_dir=activation_dir,
+            target_ts=activation_target_ts,
+        )
+        self.sae_reconstruction_hook = None
+        if enable_sae_reconstruction:
+            self.sae_reconstruction_hook = SAEReconstructionHook(self._planner, sae_path)
+            self._comparison_dir.mkdir(parents=True, exist_ok=True)
 
         self.data_processor = DataProcessor(config)
         
@@ -149,8 +168,30 @@ class DiffusionPlanner(AbstractPlanner):
         inputs = self.observation_normalizer(inputs)     
 
         self.activation_extractor.begin_planning_call()
-        _, outputs = self._planner(inputs)
-        self.activation_extractor.finish_planning_call()  
+
+        if self.sae_reconstruction_hook is None:
+            _, outputs = self._planner(inputs)
+        else:
+            # Restore RNG before the altered pass so both trajectories start from
+            # exactly the same diffusion noise; their only difference is the SAE.
+            cpu_rng = torch.random.get_rng_state()
+            cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+
+            self.sae_reconstruction_hook.enabled = False
+            _, baseline_outputs = self._planner(inputs)
+
+            torch.random.set_rng_state(cpu_rng)
+            if cuda_rng is not None:
+                torch.cuda.set_rng_state_all(cuda_rng)
+            self.sae_reconstruction_hook.enabled = True
+            try:
+                _, outputs = self._planner(inputs)
+            finally:
+                self.sae_reconstruction_hook.enabled = False
+
+            self._save_trajectory_comparison(baseline_outputs, outputs, current_input)
+
+        self.activation_extractor.finish_planning_call()
 
         # _, outputs = self._planner(inputs)   
         
@@ -160,3 +201,30 @@ class DiffusionPlanner(AbstractPlanner):
         )
 
         return trajectory
+
+    def _save_trajectory_comparison(self, baseline, altered, current_input):
+        """Save plot-ready local trajectories with stable, distinct colors."""
+        iteration = current_input.iteration.index
+        expert_states = list(self._scenario.get_ego_future_trajectory(
+            iteration,
+            self._future_horizon,
+            self._future_trajectory_sampling.num_poses,
+        ))
+        from nuplan.planning.training.preprocessing.features.trajectory_utils import (
+            convert_absolute_to_relative_poses,
+        )
+        anchor = current_input.history.current_state[0].rear_axle
+        expert = convert_absolute_to_relative_poses(
+            anchor, [state.rear_axle for state in expert_states]
+        )
+        record = {
+            "scenario_info": self._scenario_info,
+            "iteration": iteration,
+            "expert": torch.as_tensor(expert),
+            "model": baseline["prediction"][0, 0].detach().cpu(),
+            "altered": altered["prediction"][0, 0].detach().cpu(),
+            "colors": {"expert": "#FA9600", "model": "#1f77b4", "altered": "#d627a8"},
+        }
+        name = f"{self._scenario.token}_{self._comparison_index:04d}.pt"
+        torch.save(record, self._comparison_dir / name)
+        self._comparison_index += 1

@@ -26,3 +26,13 @@ diffusion_planner:
     time_horizon: 8
 
   device: cuda
+
+  # The first planning step saves one activation per target into t_<value>/.
+  activation_target_ts: [0.1, 0.2, 0.4, 0.6, 0.8]
+  activation_dir: /data/saba/parnia/activations_by_t
+
+  # When enabled, run a matched baseline pass and a second pass where the SAE
+  # reconstruction of blocks[1]'s ego activation is fed into blocks[2].
+  enable_sae_reconstruction: false
+  sae_path: /data/saba/parnia/Project/sae_output/ae_final.pt
+  comparison_dir: /data/saba/parnia/trajectory_comparisons
